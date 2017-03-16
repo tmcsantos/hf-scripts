@@ -1,0 +1,14 @@
+#!/usr/bin/env groovy
+
+// List all the groupId and artifacId elements of a multimodule maven project
+// Accesses directly to the pom.xml
+
+import static groovy.io.FileType.FILES
+import groovy.util.XmlSlurper
+
+new File(args ? args[0] : '.').eachFileRecurse(FILES) {
+    if(it.name == 'pom.xml') {
+        def rootNode = new XmlSlurper().parseText(it.text)
+        println "${rootNode.groupId}:${rootNode.artifactId}"
+    }
+}

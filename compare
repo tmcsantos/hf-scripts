@@ -1,0 +1,114 @@
+#!/usr/bin/env groovy
+
+// Compares 2 zips, 2 directories, a directory and a jar or 2 directories of zips (-list)
+
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+
+if(args.size() < 2){
+  println 'usage: compare [-list] leftFile rightFile'
+  System.exit(0)
+}
+
+File left, right
+String options
+
+if(args.size() == 3){
+  options = args[0]
+  left = new File(args[1])
+  right = new File(args[2])
+}
+else {
+  left = new File(args[0])
+  right = new File(args[1])
+}
+
+boolean list = options == '-list'
+
+if(list && left.directory && right.directory){
+  left.listFiles().each { File file ->
+    println "Comparing ${file.name}..."
+
+    File subLeft = file
+    File subRight = new File(right, subLeft.name)
+
+    if(!subRight.exists()){
+      println 'Missing on the right!'
+      println '\n'
+      return
+    }
+
+    compare(collect(subLeft), collect(subRight) )
+    println '\n'
+  }
+}
+else {
+  compare(collect(left), collect(right))
+}
+
+void compare(Map leftData, Map rightData){
+  boolean different = false
+
+  leftData.each { k, v ->
+    if(!rightData[k]){
+      different = true
+      println "-- ${k}"
+    }
+  }
+
+  rightData.each { k, v ->
+    if(!leftData[k]){
+      different = true
+      println "++ ${k}"
+    }
+  }
+
+  if(!different){
+    println "No differences."
+  }
+}
+
+Map collect(File file){
+  Map data = [:]
+
+  if(file.directory){
+    data = collectDirData(file)
+  }
+  else if(['.jar', '.zip'].any{ file.name.endsWith(it) }){
+    data = collectZipData(new ZipFile(file))
+  }
+  else {
+    println "${file.name}: Invalid file type!"
+    System.exit(0)
+  }
+
+  data
+}
+
+
+Map collectDirData(File dir) {
+  Map data = [:]
+  dir.eachFileRecurse { File file ->
+    // stuff to compare, just name for now
+    data << [
+        (file.canonicalPath - (dir.canonicalPath + '/')): [
+            size: file.size()
+        ]
+    ]
+  }
+  data
+}
+
+Map collectZipData(ZipFile zip) {
+  Map data = [:]
+  zip.entries().each { ZipEntry entry ->
+    data << [
+        (entry.name): [
+            size: entry.size
+        ]
+    ]
+  }
+  data
+}
+
+

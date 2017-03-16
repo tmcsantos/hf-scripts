@@ -1,0 +1,15 @@
+#!/usr/bin/env groovy
+
+// copy all jars in a project to a destination, as long as they are directly under a "target" folder
+
+import java.nio.file.Files
+import static groovy.io.FileType.FILES
+
+File search = new File(args[0])
+File output = new File(args[1])
+
+search.eachFileRecurse(FILES) {
+  if(it.name.endsWith('.jar') && !it.name.endsWith('sources.jar') && it.parentFile.name == 'target') {
+    Files.copy(it.toPath(), new File(output, it.name).toPath())
+  }
+}
