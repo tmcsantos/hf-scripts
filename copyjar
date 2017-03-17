@@ -8,8 +8,14 @@ import static groovy.io.FileType.FILES
 File search = new File(args[0])
 File output = new File(args[1])
 
-search.eachFileRecurse(FILES) {
-  if(it.name.endsWith('.jar') && !it.name.endsWith('sources.jar') && it.parentFile.name == 'target') {
-    Files.copy(it.toPath(), new File(output, it.name).toPath())
+List parents = ['target']
+List extensions = ['.jar', '.zip', '.kar']
+List blacklist = ['-sources.jar']
+
+search.eachFileRecurse(FILES) { file ->
+  if( extensions.any{ file.name.endsWith(it) } &&
+      !blacklist.any{ file.name.endsWith(it) } &&
+      file.parentFile.name in parents) {
+    Files.copy(file.toPath(), new File(output, file.name).toPath())
   }
 }
