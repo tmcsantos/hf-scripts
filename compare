@@ -74,7 +74,7 @@ Map collect(File file){
   if(file.directory){
     data = collectDirData(file)
   }
-  else if(['.jar', '.zip'].any{ file.name.endsWith(it) }){
+  else if(['.jar', '.zip', '.kar'].any{ file.name.endsWith(it) }){
     data = collectZipData(new ZipFile(file))
   }
   else {
