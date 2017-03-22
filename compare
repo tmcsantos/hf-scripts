@@ -1,31 +1,23 @@
 #!/usr/bin/env groovy
-
-// Compares 2 zips, 2 directories, a directory and a jar or 2 directories of zips (-list)
-
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
+import javax.xml.bind.DatatypeConverter
+import java.security.MessageDigest
+
+// Compares 2 zips, 2 directories, a directory and a jar or 2 directories of zips
 
 if(args.size() < 2){
-  println 'usage: compare [-list] leftFile rightFile'
+  println 'usage: compare leftFile rightFile'
   System.exit(0)
 }
 
 File left, right
 String options
 
-if(args.size() == 3){
-  options = args[0]
-  left = new File(args[1])
-  right = new File(args[2])
-}
-else {
-  left = new File(args[0])
-  right = new File(args[1])
-}
+left = new File(args[0])
+right = new File(args[1])
 
-boolean list = options == '-list'
-
-if(list && left.directory && right.directory){
+if(left.directory && right.directory){
   left.listFiles().each { File file ->
     println "Comparing ${file.name}..."
 
@@ -54,6 +46,10 @@ void compare(Map leftData, Map rightData){
       different = true
       println "-- ${k}"
     }
+    else if(rightData[k] != v ){
+      different = true
+      println "!= ${k}"
+    }
   }
 
   rightData.each { k, v ->
@@ -68,47 +64,43 @@ void compare(Map leftData, Map rightData){
   }
 }
 
-Map collect(File file){
+Map collect(File root){
   Map data = [:]
+  String key
 
-  if(file.directory){
-    data = collectDirData(file)
+  if(root.directory){
+    root.eachFileRecurse { File subfile ->
+      key = subfile.canonicalPath - (root.canonicalPath + '/')
+
+      data << [(key): subfile.directory ? 'd' : collectData(subfile.newInputStream())]
+    }
   }
-  else if(['.jar', '.zip', '.kar'].any{ file.name.endsWith(it) }){
-    data = collectZipData(new ZipFile(file))
+  else if(['.jar', '.zip', '.kar'].any{ root.name.endsWith(it) }){
+    // zip files
+    ZipFile zip = new ZipFile(root)
+    zip.entries().each { ZipEntry entry ->
+      key = entry.name
+
+      data << [(key): entry.directory ? 'd' : collectData(zip.getInputStream(entry))]
+    }
   }
   else {
-    println "${file.name}: Invalid file type!"
-    System.exit(0)
+    // whatever file
+    key = root.canonicalPath - (root.parentFile.canonicalPath + '/')
+
+    data << [(key): collectData(root.newInputStream())]
   }
 
   data
 }
 
+String collectData(InputStream stream) {
+  MessageDigest md = MessageDigest.getInstance("SHA")
+  md.update(stream.bytes)
+  stream.close()
 
-Map collectDirData(File dir) {
-  Map data = [:]
-  dir.eachFileRecurse { File file ->
-    // stuff to compare, just name for now
-    data << [
-        (file.canonicalPath - (dir.canonicalPath + '/')): [
-            size: file.size()
-        ]
-    ]
-  }
-  data
+  DatatypeConverter.printHexBinary(md.digest())
 }
 
-Map collectZipData(ZipFile zip) {
-  Map data = [:]
-  zip.entries().each { ZipEntry entry ->
-    data << [
-        (entry.name): [
-            size: entry.size
-        ]
-    ]
-  }
-  data
-}
 
 
