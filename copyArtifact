@@ -4,18 +4,28 @@
 
 import java.nio.file.Files
 import static groovy.io.FileType.FILES
+import groovy.util.XmlSlurper
 
 File search = new File(args[0])
 File output = new File(args[1])
 
-List parents = ['target']
-List extensions = ['.jar', '.zip', '.kar']
+List parents = ['target', 'target/feature']
+List extensions = ['.jar', '.zip', '.kar', 'feature.xml']
 List blacklist = ['-sources.jar']
 
 search.eachFileRecurse(FILES) { file ->
   if( extensions.any{ file.name.endsWith(it) } &&
       !blacklist.any{ file.name.endsWith(it) } &&
-      file.parentFile.name in parents) {
-    Files.copy(file.toPath(), new File(output, file.name).toPath())
+      parents.any{ file.parentFile.absolutePath.endsWith(it) }) {
+
+    String outName = file.name
+
+    if(outName == 'feature.xml'){
+      def rootNode = new XmlSlurper().parseText(file.text)
+      outName = rootNode.@name.text() + '-feature.xml'
+    }
+
+    println outName
+    Files.copy(file.toPath(), new File(output, outName).toPath())
   }
 }
