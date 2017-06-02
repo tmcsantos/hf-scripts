@@ -1,0 +1,26 @@
+#!/usr/bin/env groovy
+
+// copy all jars in a project to a destination, as long as they are directly under a "target" folder
+
+import java.nio.file.Files
+import static groovy.io.FileType.FILES
+import groovy.util.XmlSlurper
+
+File search = new File(args[0])
+//File resources = new File('.')
+
+search.eachFileRecurse(FILES) { File file ->
+  if( !file.name.endsWith('.java') ) {
+//    String relativeFrom = 'src/test/java' + (file.canonicalPath - search.canonicalPath)
+//    String relativeTo = 'src/test/resources' + (file.canonicalPath - search.canonicalPath)
+
+    println file
+//    File newFile = new File(relativeTo)
+//    newFile.parentFile.mkdirs()
+
+//    String cmd = "git mv ${relativeFrom} ${relativeTo}"
+//    println cmd
+//   Runtime.runtime.exec(cmd)
+
+  }
+}

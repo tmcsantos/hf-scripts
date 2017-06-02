@@ -1,4 +1,6 @@
 #!/usr/bin/env groovy
+import groovy.transform.Field
+
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import javax.xml.bind.DatatypeConverter
@@ -7,17 +9,29 @@ import java.security.MessageDigest
 // Compares 2 zips, 2 directories, a directory and a jar or 2 directories of zips
 
 if(args.size() < 2){
-  println 'usage: compare leftFile rightFile'
+  println 'usage: compare <options> leftFile rightFile'
+  println 'options:'
+  println '  -e: expand archives in the base directory to compare'
+  println '  -h: perform hash comparison'
   System.exit(0)
 }
 
+excludes = ['pom.properties']
+
 File left, right
-String options
+@Field String options = ''
 
-left = new File(args[0])
-right = new File(args[1])
+if(args.size() == 2) {
+  left = new File(args[0])
+  right = new File(args[1])
+}
+else{
+  options = args[0] - '-'
+  left = new File(args[1])
+  right = new File(args[2])
+}
 
-if(left.directory && right.directory){
+if(left.directory && right.directory && options.contains('e')){
   left.listFiles().each { File file ->
     println "Comparing ${file.name}..."
 
@@ -46,7 +60,7 @@ void compare(Map leftData, Map rightData){
       different = true
       println "-- ${k}"
     }
-    else if(rightData[k] != v ){
+    else if(excludes.every { !k.endsWith(it) } && rightData[k] != v ){
       different = true
       println "!= ${k}"
     }
@@ -79,7 +93,7 @@ Map collect(File root){
     // zip files
     ZipFile zip = new ZipFile(root)
     zip.entries().each { ZipEntry entry ->
-      key = entry.name
+      key = entry.directory ? entry.name[0..-2] : entry.name
 
       data << [(key): entry.directory ? 'd' : collectData(zip.getInputStream(entry))]
     }
@@ -95,6 +109,10 @@ Map collect(File root){
 }
 
 String collectData(InputStream stream) {
+  if(!options.contains('h')){
+    return '0'
+  }
+
   MessageDigest md = MessageDigest.getInstance("SHA")
   md.update(stream.bytes)
   stream.close()
