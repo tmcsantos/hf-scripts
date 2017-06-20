@@ -16,6 +16,7 @@ cli._(longOpt: 'color', 'use ANSI color sequences to distinguish comparisons')
 cli.e(longOpt: 'expand', 'expand archives in the base directory to compare')
 cli._(longOpt: 'diff', 'compare files line by line')
 cli.h(longOpt: 'hash', 'perform hash comparison')
+cli.n(longOpt: 'normalize', args: 1, argName: 'list', 'comma separated filename pattern to normalize')
 
 options = cli.parse(args)
 
@@ -25,6 +26,7 @@ if (!options || options?.help || options?.arguments()?.size() != 2 ) {
 }
 
 excludes = ['pom.properties']
+normalizePatterns = options.n ? options.n.split(',') : false
 
 oldFile = new File(options.arguments()[0])
 newFile = new File(options.arguments()[1])
@@ -74,7 +76,7 @@ void printDiff(message) {
 }
 
 void diff(InputStream left, InputStream right = null) {
-  if (options.diff) {
+  if (options.diff && left) {
     File tmp1 = File.createTempFile('left', null)
     tmp1.deleteOnExit()
     Files.copy(left, tmp1.toPath(), StandardCopyOption.REPLACE_EXISTING)
@@ -133,17 +135,28 @@ void compare(Map<String, Tuple2> leftData, Map<String, Tuple2> rightData){
   }
 }
 
+String normalize(String key){
+  if(options.n){
+    String nkey = key
+    normalizePatterns.each { String pattern ->
+      nkey = nkey.replaceAll(pattern, '')
+    }
+    return nkey
+  }
+  key
+}
+
 Map<String, Tuple2> collect(File root){
   Map data = [:]
   String key
 
   if(root.directory){
     root.eachFileRecurse { File subfile ->
-      key = subfile.canonicalPath - (root.canonicalPath + '/')
+      key = normalize(subfile.canonicalPath - (root.canonicalPath + '/'))
 
       Tuple2 pair = new Tuple2(
-          subfile.newInputStream(),
-          subfile.directory ? 'd' : collectData(subfile.newInputStream())
+          subfile.directory ? null : subfile.newInputStream(),
+          subfile.directory ? 'd' : collectData(subfile.newInputStream()) 
       )
       data << [(key): pair]
     }
@@ -152,7 +165,7 @@ Map<String, Tuple2> collect(File root){
     // zip files
     ZipFile zip = new ZipFile(root)
     zip.entries().each { ZipEntry entry ->
-      key = entry.directory ? entry.name[0..-2] : entry.name
+      key = normalize(entry.directory ? entry.name[0..-2] : entry.name)
 
       Tuple2 pair = new Tuple2(
           zip.getInputStream(entry),
@@ -164,7 +177,7 @@ Map<String, Tuple2> collect(File root){
   }
   else {
     // whatever file
-    key = root.canonicalPath
+    key = normalize(root.canonicalPath)
 
     Tuple2 pair = new Tuple2(
         root.newInputStream(),
