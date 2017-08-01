@@ -19,7 +19,7 @@ def cli = new CliBuilder(
     usage: 'compare [options] <oldFile> <newFile>',
     header: 'Options:')
 cli._(longOpt: 'help', 'print this message')
-cli._(longOpt: 'color', 'use ANSI color sequences to distinguish comparisons')
+cli._(longOpt: 'nocolor', 'do not use ANSI color sequences to distinguish comparisons')
 cli.e(longOpt: 'expand', 'expand archives in the base directory to compare')
 cli._(longOpt: 'diff', 'compare files line by line')
 cli.h(longOpt: 'hash', 'perform hash comparison')
@@ -61,26 +61,26 @@ if (oldFile.directory && newFile.directory && options.e) {
 }
 
 void printMiss(message) {
-  if (options.color) {
-    println("\033[0;31m$message\033[0m")
-  } else {
+  if (options.nocolor) {
     println(message)
+  } else {
+    println("\033[0;31m$message\033[0m")
   }
 }
 
 void printAdd(message) {
-  if (options.color) {
-    println("\033[0;32m$message\033[0m")
-  } else {
+  if (options.nocolor) {
     println(message)
+  } else {
+    println("\033[0;32m$message\033[0m")
   }
 }
 
 void printDiff(message) {
-  if (options.color) {
-    println("\033[0;36m$message\033[0m")
-  } else {
+  if (options.nocolor) {
     println(message)
+  } else {
+    println("\033[0;36m$message\033[0m")
   }
 }
 
