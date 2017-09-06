@@ -22,6 +22,7 @@ cli._(longOpt: 'help', 'print this message')
 cli._(longOpt: 'nocolor', 'do not use ANSI color sequences to distinguish comparisons')
 cli.e(longOpt: 'expand', 'expand archives in the base directory to compare')
 cli._(longOpt: 'diff', 'compare files line by line')
+cli.t(longOpt: 'tool', args: 1, argName:'tool', 'use the diff tool specified by <tool>')
 cli.h(longOpt: 'hash', 'perform hash comparison')
 cli.n(longOpt: 'normalize', args: 1, argName: 'list', 'comma separated filename pattern to normalize')
 cli.d(longOpt: 'decompile', 'decompile class files')
@@ -99,7 +100,11 @@ void diff(InputStream left, InputStream right = null, decompile = false) {
       b = tmp2
       if (decompile && options.decompile) b = decompileClass tmp2
       println('='*80)
-      execute("diff -ytd --suppress-common-lines --strip-trailing-cr $a $b")
+      if (options.tool) {
+        execute("$options.tool $a $b")
+      } else {
+        execute("diff -ytd --suppress-common-lines --strip-trailing-cr $a $b")
+      }
     } else {
       execute("cat $a")
     }
