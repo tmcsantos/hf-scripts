@@ -99,11 +99,11 @@ void diff(InputStream left, InputStream right = null, decompile = false) {
       Files.copy(right, tmp2.toPath(), StandardCopyOption.REPLACE_EXISTING)
       b = tmp2
       if (decompile && options.decompile) b = decompileClass tmp2
-      println('='*80)
+      println('='*270)
       if (options.tool) {
         execute("$options.tool $a $b")
       } else {
-        execute("diff -ytd --suppress-common-lines --strip-trailing-cr $a $b")
+        execute("diff -W 270 -ytd --suppress-common-lines --strip-trailing-cr $a $b")
       }
     } else {
       execute("cat $a")
