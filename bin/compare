@@ -189,7 +189,7 @@ Map<String, Tuple2> collect(File root){
       data << [(key): pair]
     }
   }
-  else if(['.jar', '.zip', '.kar'].any{ root.name.endsWith(it) }){
+  else if(isArchive(root)) {
     // zip files
     ZipFile zip = new ZipFile(root)
     zip.entries().each { ZipEntry entry ->
@@ -227,4 +227,11 @@ String collectData(InputStream stream) {
   stream.close()
 
   DatatypeConverter.printHexBinary(md.digest())
+}
+
+boolean isArchive(File root) {
+//  ['.jar', '.zip', '.kar', '.war'].any{ root.name.endsWith(it) }
+  int ZIP_MAGIC = 19280
+  RandomAccessFile raf = new RandomAccessFile(root, "r")
+  ZIP_MAGIC == (raf.read() & 0xff | ((raf.read() << 8) & 0xff00))
 }
