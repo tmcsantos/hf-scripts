@@ -13,6 +13,8 @@ import com.strobel.decompiler.Decompiler
 import com.strobel.decompiler.DecompilerSettings
 import com.strobel.decompiler.PlainTextOutput
 
+ZIP_MAGIC = 19280
+TWIDTH = System.getenv("COLUMNS").toInteger() ?: 270
 // Compares 2 zips, 2 directories, a directory and a jar or 2 directories of zips
 
 def cli = new CliBuilder(
@@ -26,6 +28,7 @@ cli.t(longOpt: 'tool', args: 1, argName:'tool', 'use the diff tool specified by 
 cli.h(longOpt: 'hash', 'perform hash comparison')
 cli.n(longOpt: 'normalize', args: 1, argName: 'list', 'comma separated filename pattern to normalize')
 cli.d(longOpt: 'decompile', 'decompile class files')
+cli.r(longOpt: 'recursive', 'compare recursively inside archives')
 
 options = cli.parse(args)
 
@@ -85,28 +88,19 @@ void printDiff(message) {
   }
 }
 
-void diff(InputStream left, InputStream right = null, decompile = false) {
-  File a, b
+void diff(File left, File right = null, String ext = null) {
   if (options.diff && left) {
-    File tmp1 = File.createTempFile('left', decompile ? '.class' : null)
-    tmp1.deleteOnExit()
-    Files.copy(left, tmp1.toPath(), StandardCopyOption.REPLACE_EXISTING)
-    a = tmp1
-    if (decompile && options.decompile) a = decompileClass tmp1
+    if (ext == 'class' && options.decompile) left = decompileClass left
     if (right) {
-      File tmp2 = File.createTempFile('right', decompile ? '.class' : null)
-      tmp2.deleteOnExit()
-      Files.copy(right, tmp2.toPath(), StandardCopyOption.REPLACE_EXISTING)
-      b = tmp2
-      if (decompile && options.decompile) b = decompileClass tmp2
-      println('='*270)
+      if (ext == 'class' && options.decompile) right = decompileClass right
+      println('=' * TWIDTH)
       if (options.tool) {
-        execute("$options.tool $a $b")
+        execute("$options.tool $left $right")
       } else {
-        execute("diff -W 270 -ytd --suppress-common-lines --strip-trailing-cr $a $b")
+        execute("diff -W $TWIDTH -ytd --suppress-common-lines --strip-trailing-cr $left $right")
       }
     } else {
-      execute("cat $a")
+      execute("cat $left")
     }
   }
 }
@@ -128,22 +122,31 @@ void execute(cmd) {
   println stdout
 }
 
-void compare(Map<String, Tuple2> leftData, Map<String, Tuple2> rightData){
+void compare(Map<String, Tuple2<InputStream, String>> leftData, Map<String, Tuple2<InputStream, String>> rightData){
   boolean different = false
 
   leftData.each { k, v ->
+    String ext = k.substring(k.lastIndexOf('.') + 1)
     if(!rightData[k]){
       different = true
       printMiss "-- ${k}"
 //      if (v.second != 'd') {
-//        diff(v.first, null, k.endsWith('.class'))
+//        diff(v.first, null)
 //      }
     }
     else if(excludes.every { !k.endsWith(it) } && rightData[k].second != v.second ){
       different = true
       printDiff "!= ${k}"
       if (v.second != 'd') {
-        diff(v.first, rightData[k].first, k.endsWith('.class'))
+        File tmp1 = File.createTempFile('left', '.' + ext)
+        tmp1.deleteOnExit()
+        Files.copy(v.first, tmp1.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        File tmp2 = File.createTempFile('right', '.' + ext)
+        tmp2.deleteOnExit()
+        Files.copy(rightData[k].first, tmp2.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        if (options.recursive && isArchive(tmp1)) {
+          compare(collect(tmp1), collect(tmp2))
+        } else diff(tmp1, tmp2, ext)
       }
     }
   }
@@ -153,7 +156,7 @@ void compare(Map<String, Tuple2> leftData, Map<String, Tuple2> rightData){
       different = true
       printAdd "++ ${k}"
 //      if (v.second != 'd') {
-//        diff(v.first, null, k.endsWith('.class'))
+//        diff(v.first, null)
 //      }
     }
   }
@@ -195,7 +198,7 @@ Map<String, Tuple2> collect(File root){
     zip.entries().each { ZipEntry entry ->
       key = normalize(entry.directory ? entry.name[0..-2] : entry.name)
 
-      Tuple2 pair = new Tuple2(
+      Tuple2<InputStream, String> pair = new Tuple2(
           zip.getInputStream(entry),
           entry.directory ? 'd' : collectData(zip.getInputStream(entry))
       )
@@ -231,7 +234,6 @@ String collectData(InputStream stream) {
 
 boolean isArchive(File root) {
 //  ['.jar', '.zip', '.kar', '.war'].any{ root.name.endsWith(it) }
-  int ZIP_MAGIC = 19280
   RandomAccessFile raf = new RandomAccessFile(root, "r")
   ZIP_MAGIC == (raf.read() & 0xff | ((raf.read() << 8) & 0xff00))
 }
