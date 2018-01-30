@@ -1,6 +1,6 @@
 #!/usr/bin/env groovy
 @Grapes(
-    @Grab(group='org.bitbucket.mstrobel', module='procyon-compilertools', version='0.5.32')
+    @Grab(group = 'org.bitbucket.mstrobel', module = 'procyon-compilertools', version = '0.5.32')
 )
 
 import java.nio.file.Files
@@ -14,7 +14,7 @@ import com.strobel.decompiler.DecompilerSettings
 import com.strobel.decompiler.PlainTextOutput
 
 ZIP_MAGIC = 19280
-TWIDTH = System.getenv("COLUMNS").toInteger() ?: 270
+TWIDTH = System.getenv("COLUMNS")?.toInteger() ?: 200
 // Compares 2 zips, 2 directories, a directory and a jar or 2 directories of zips
 
 def cli = new CliBuilder(
@@ -88,19 +88,27 @@ void printDiff(message) {
   }
 }
 
+boolean isTextFile(File file){
+  execute("file $file").toLowerCase().contains('text')
+}
+
 void diff(File left, File right = null, String ext = null) {
   if (options.diff && left) {
-    if (ext == 'class' && options.decompile) left = decompileClass left
+    if (ext == 'class' && options.decompile) left = decompileClass(left)
+
+    // ignore non text files
+    if(!isTextFile(left)) return
+
     if (right) {
-      if (ext == 'class' && options.decompile) right = decompileClass right
-      println('=' * TWIDTH)
+      if (ext == 'class' && options.decompile) right = decompileClass(right)
+      println('-' * TWIDTH)
       if (options.tool) {
-        execute("$options.tool $left $right")
+        println execute("$options.tool $left $right")
       } else {
-        execute("diff -W $TWIDTH -ytd --suppress-common-lines --strip-trailing-cr $left $right")
+        println execute("diff -W $TWIDTH -ytd --suppress-common-lines --strip-trailing-cr $left $right")
       }
     } else {
-      execute("cat $left")
+      println execute("cat $left")
     }
   }
 }
@@ -114,12 +122,12 @@ File decompileClass(File file) {
   src
 }
 
-void execute(cmd) {
+String execute(cmd) {
   def stdout = new StringBuilder(), stderr = new StringBuilder()
   def proc = "$cmd".execute()
   proc.consumeProcessOutput(stdout, stderr)
   proc.waitFor()
-  println stdout
+  return stdout.toString()
 }
 
 void compare(Map<String, Tuple2<InputStream, String>> leftData, Map<String, Tuple2<InputStream, String>> rightData){
