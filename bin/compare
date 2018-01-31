@@ -1,20 +1,18 @@
 #!/usr/bin/env groovy
-@Grapes(
-    @Grab(group = 'org.bitbucket.mstrobel', module = 'procyon-compilertools', version = '0.5.32')
-)
+@Grapes([
+    @Grab(group = 'org.bitbucket.mstrobel', module = 'procyon-compilertools', version = '0.5.32'),
+    @Grab(group = 'org.lz4', module = 'lz4-java', version = '1.4.1')
+])
 
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
-import javax.xml.bind.DatatypeConverter
-import java.security.MessageDigest
+import net.jpountz.xxhash.XXHashFactory
 import com.strobel.decompiler.Decompiler
 import com.strobel.decompiler.DecompilerSettings
 import com.strobel.decompiler.PlainTextOutput
 
-ZIP_MAGIC = 19280
-TWIDTH = System.getenv("COLUMNS")?.toInteger() ?: 200
 // Compares 2 zips, 2 directories, a directory and a jar or 2 directories of zips
 
 def cli = new CliBuilder(
@@ -36,6 +34,12 @@ if (!options || options?.help || options?.arguments()?.size() != 2 ) {
   cli.usage()
   return
 }
+ZIP_MAGIC = 0x504b
+CLASS_MAGIC = 0xCAFEBABE
+TWIDTH = System.getenv("COLUMNS")?.toInteger() ?: 200
+
+factory = XXHashFactory.fastestInstance()
+MD = factory.newStreamingHash32((int) 0x9747b28c)
 
 excludes = ['pom.properties']
 normalizePatterns = options.n ? options.n.split(',') : false
@@ -88,33 +92,32 @@ void printDiff(message) {
   }
 }
 
-boolean isTextFile(File file){
-  execute("file $file").toLowerCase().contains('text')
-}
-
-void diff(File left, File right = null, String ext = null) {
+void diff(InputStream left, InputStream right = null) {
   if (options.diff && left) {
-    if (ext == 'class' && options.decompile) left = decompileClass(left)
+    boolean isClassFile = isClass(left)
+    File a = tempFile(left, 'left', isClassFile ? 'class' : null)
+    if (options.decompile && isClassFile) a = decompileClass(a)
 
     // ignore non text files
-    if(!isTextFile(left)) return
+    if(!isTextFile(a)) return
 
     if (right) {
-      if (ext == 'class' && options.decompile) right = decompileClass(right)
+      File b = tempFile(right, 'right', isClassFile ? 'class' : null)
+      if (options.decompile && isClassFile) b = decompileClass(b)
       println('-' * TWIDTH)
       if (options.tool) {
-        println execute("$options.tool $left $right")
+        println execute("$options.tool $a $b")
       } else {
-        println execute("diff -W $TWIDTH -ytd --suppress-common-lines --strip-trailing-cr $left $right")
+        println execute("diff -W $TWIDTH -ytd --suppress-common-lines --strip-trailing-cr $a $b")
       }
     } else {
-      println execute("cat $left")
+      println execute("cat $a")
     }
   }
 }
 
 File decompileClass(File file) {
-  File src = File.createTempFile('decompiled', null)
+  File src = File.createTempFile('decompiled', '.java')
   src.deleteOnExit()
   src.withWriter { Writer writer ->
     Decompiler.decompile(file.canonicalPath, new PlainTextOutput(writer), settings)
@@ -146,15 +149,12 @@ void compare(Map<String, Tuple2<InputStream, String>> leftData, Map<String, Tupl
       different = true
       printDiff "!= ${k}"
       if (v.second != 'd') {
-        File tmp1 = File.createTempFile('left', '.' + ext)
-        tmp1.deleteOnExit()
-        Files.copy(v.first, tmp1.toPath(), StandardCopyOption.REPLACE_EXISTING)
-        File tmp2 = File.createTempFile('right', '.' + ext)
-        tmp2.deleteOnExit()
-        Files.copy(rightData[k].first, tmp2.toPath(), StandardCopyOption.REPLACE_EXISTING)
-        if (options.recursive && isArchive(tmp1)) {
+        if (options.recursive && isArchive(v.first)) {
+          File tmp1 = tempFile(v.first, 'left', ext)
+          File tmp2 = tempFile(rightData[k].first, 'right', ext)
+
           compare(collect(tmp1), collect(tmp2))
-        } else diff(tmp1, tmp2, ext)
+        } else diff(v.first, rightData[k].first)
       }
     }
   }
@@ -203,11 +203,11 @@ Map<String, Tuple2> collect(File root){
   else if(isArchive(root)) {
     // zip files
     ZipFile zip = new ZipFile(root)
-    zip.entries().each { ZipEntry entry ->
+    zip.stream().each { ZipEntry entry ->
       key = normalize(entry.directory ? entry.name[0..-2] : entry.name)
 
       Tuple2<InputStream, String> pair = new Tuple2(
-          zip.getInputStream(entry),
+          new BufferedInputStream(zip.getInputStream(entry)),
           entry.directory ? 'd' : collectData(zip.getInputStream(entry))
       )
 
@@ -233,15 +233,42 @@ String collectData(InputStream stream) {
     return '0'
   }
 
-  MessageDigest md = MessageDigest.getInstance("SHA")
-  md.update(stream.bytes)
+  MD.reset()
+  byte[] bytes = new byte[32 << 8]
+  int numbytes
+  while ( (numbytes = stream.read(bytes)) != -1 ) {
+    MD.update(bytes, 0, numbytes)
+  }
   stream.close()
 
-  DatatypeConverter.printHexBinary(md.digest())
+  String.valueOf(MD.getValue())
 }
 
-boolean isArchive(File root) {
+File tempFile(InputStream stream, String prefix, String suffix) {
+  File tmp1 = File.createTempFile(prefix, '.' + suffix )
+  tmp1.deleteOnExit()
+  Files.copy(stream, tmp1.toPath(), StandardCopyOption.REPLACE_EXISTING)
+  tmp1
+}
+
+boolean isTextFile(File file){
+  execute("file $file").toLowerCase().contains('text')
+}
+
+boolean isArchive(def file) {
 //  ['.jar', '.zip', '.kar', '.war'].any{ root.name.endsWith(it) }
-  RandomAccessFile raf = new RandomAccessFile(root, "r")
-  ZIP_MAGIC == (raf.read() & 0xff | ((raf.read() << 8) & 0xff00))
+  checkOnMagic(file, 2, ZIP_MAGIC)
+}
+
+boolean isClass(def file) {
+  checkOnMagic(file, 4, CLASS_MAGIC)
+}
+
+boolean checkOnMagic(def file, int read, def magic) {
+  if (file instanceof File) file = new BufferedInputStream(new FileInputStream(file))
+  if (file.markSupported()) file.mark(read)
+  long check = 0l
+  (read-1..0).each { check |= ((long) file.read() << it * 8) }
+  if (file.markSupported()) file.reset()
+  check == magic
 }
