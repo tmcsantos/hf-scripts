@@ -27,6 +27,7 @@ cli.h(longOpt: 'hash', 'perform hash comparison')
 cli.n(longOpt: 'normalize', args: 1, argName: 'list', 'comma separated filename pattern to normalize')
 cli.d(longOpt: 'decompile', 'decompile class files')
 cli.r(longOpt: 'recursive', 'compare recursively inside archives')
+cli.f(longOpt: 'filter', args: 1, argName: 'exp', 'filter only matching expression')
 
 options = cli.parse(args)
 
@@ -133,28 +134,34 @@ String execute(cmd) {
   return stdout.toString()
 }
 
-void compare(Map<String, Tuple2<InputStream, String>> leftData, Map<String, Tuple2<InputStream, String>> rightData){
+void compare(Map<String, Tuple2<InputStream, String>> leftData, Map<String, Tuple2<InputStream, String>> rightData, int depth = 0){
   boolean different = false
+  boolean match
 
   leftData.each { k, v ->
+    match = matches(k)
     String ext = k.substring(k.lastIndexOf('.') + 1)
     if(!rightData[k]){
       different = true
-      printMiss "-- ${k}"
+      if (match) printMiss "-- ${k}"
 //      if (v.second != 'd') {
 //        diff(v.first, null)
 //      }
     }
     else if(excludes.every { !k.endsWith(it) } && rightData[k].second != v.second ){
       different = true
-      printDiff "!= ${k}"
       if (v.second != 'd') {
         if (options.recursive && isArchive(v.first)) {
           File tmp1 = tempFile(v.first, 'left', ext)
           File tmp2 = tempFile(rightData[k].first, 'right', ext)
 
-          compare(collect(tmp1), collect(tmp2))
-        } else diff(v.first, rightData[k].first)
+          printDiff "${depth>0 ? '│' : ''}${'  '*depth}!= ${k}"
+          compare(collect(tmp1), collect(tmp2), ++depth)
+          --depth
+        } else if (match) {
+          printDiff "${' '*depth}!= ${k}"
+          diff(v.first, rightData[k].first)
+        }
       }
     }
   }
@@ -162,14 +169,14 @@ void compare(Map<String, Tuple2<InputStream, String>> leftData, Map<String, Tupl
   rightData.each { k, v ->
     if(!leftData[k]){
       different = true
-      printAdd "++ ${k}"
+      if (match) printAdd "++ ${k}"
 //      if (v.second != 'd') {
 //        diff(v.first, null)
 //      }
     }
   }
 
-  if(!different){
+  if(!different && depth == 0){
     println "No differences."
   }
 }
@@ -183,6 +190,13 @@ String normalize(String key){
     return nkey
   }
   key
+}
+
+boolean matches(String key){
+  if(options.filter){
+    return key ==~ options.filter
+  }
+  true
 }
 
 Map<String, Tuple2> collect(File root){
