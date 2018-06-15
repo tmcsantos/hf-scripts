@@ -5,7 +5,9 @@
 ])
 
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.stream.Stream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import net.jpountz.xxhash.XXHashFactory
@@ -93,6 +95,16 @@ void printDiff(message) {
   }
 }
 
+void printTree(String message, int depth, boolean hasNext) {
+  def sb = ''<<''
+  if (depth) {
+    if (hasNext) sb << '│  '*depth
+    sb << (hasNext ? '├─ ' : '└─ ')
+  }
+  print sb
+  printDiff(message)
+}
+
 void diff(InputStream left, InputStream right = null) {
   if (options.diff && left) {
     boolean isClassFile = isClass(left)
@@ -134,50 +146,71 @@ String execute(cmd) {
   return stdout.toString()
 }
 
-void compare(Map<String, Tuple2<InputStream, String>> leftData, Map<String, Tuple2<InputStream, String>> rightData, int depth = 0){
-  boolean different = false
+void compare(Stream<Map.Entry<String, Tuple2<InputStream, String>>> left, Stream<Map.Entry<String, Tuple2<InputStream, String>>> right, int depth = 0){
   boolean match
+  String key, ext
+  Tuple2<InputStream, String> lvalue, rvalue
+  Map.Entry<String, Tuple2<InputStream, String>> lentry, rentry
 
-  leftData.each { k, v ->
-    match = matches(k)
-    String ext = k.substring(k.lastIndexOf('.') + 1)
-    if(!rightData[k]){
-      different = true
-      if (match) printMiss "-- ${k}"
-//      if (v.second != 'd') {
-//        diff(v.first, null)
-//      }
-    }
-    else if(excludes.every { !k.endsWith(it) } && rightData[k].second != v.second ){
-      different = true
-      if (v.second != 'd') {
-        if (options.recursive && isArchive(v.first)) {
-          File tmp1 = tempFile(v.first, 'left', ext)
-          File tmp2 = tempFile(rightData[k].first, 'right', ext)
+  Iterator l = left.iterator(), r = right.iterator()
+  lentry = l.hasNext() ? l.next() : null
+  rentry = r.hasNext() ? r.next() : null
 
-          printDiff "${depth>0 ? '│' : ''}${'  '*depth}!= ${k}"
-          compare(collect(tmp1), collect(tmp2), ++depth)
-          --depth
-        } else if (match) {
-          printDiff "${' '*depth}!= ${k}"
-          diff(v.first, rightData[k].first)
+  if (!lentry || !rentry) {
+    println "NO MATCH!"
+    return
+  }
+
+  while (lentry && rentry) {
+    key = lentry.key
+    match = matches(key)
+    switch (key <=> rentry.key) {
+      case -1:
+        if (match) printMiss "-- $key"
+        lentry = l.hasNext() ? l.next() : null
+        break
+      case 0:
+        lvalue = lentry.value
+        rvalue = rentry.value
+        if (excludes.every { !key.endsWith(it) } && lvalue.second != rvalue.second) {
+          if (options.recursive && isArchive(lvalue.first)) {
+            ext = key.substring(key.lastIndexOf('.') + 1)
+
+            File tmp1 = tempFile(lvalue.first, 'left', ext)
+            File tmp2 = tempFile(rvalue.first, 'right', ext)
+
+            def ll = collect(tmp1)
+            def rr = collect(tmp2)
+
+            printTree("!= $key", depth++, true)
+            compare(ll, rr, depth--)
+            ll = null
+            rr = null
+          } else if (match){
+            printTree("!= $key", depth, l.hasNext())
+            diff(lvalue.first, rvalue.first)
+          }
         }
-      }
+        lentry = l.hasNext() ? l.next() : null
+        rentry = r.hasNext() ? r.next() : null
+        break
+      case 1:
+        if (match) printAdd "++ $key"
+        rentry = r.hasNext() ? r.next() : null
+        break
     }
   }
 
-  rightData.each { k, v ->
-    if(!leftData[k]){
-      different = true
-      if (match) printAdd "++ ${k}"
-//      if (v.second != 'd') {
-//        diff(v.first, null)
-//      }
-    }
+  while (l.hasNext()) {
+    lentry = l.next()
+    key = lentry.key
+    if (match) printMiss "-- $key"
   }
 
-  if(!different && depth == 0){
-    println "No differences."
+  while (r.hasNext()) {
+    rentry = r.next()
+    key = rentry.key
+    if (match) printAdd "++ $key"
   }
 }
 
@@ -199,47 +232,47 @@ boolean matches(String key){
   true
 }
 
-Map<String, Tuple2> collect(File root){
-  Map data = [:]
-  String key
 
-  if(root.directory){
-    root.eachFileRecurse { File subfile ->
-      key = normalize(subfile.canonicalPath - (root.canonicalPath + '/'))
-
+Stream<Map.Entry<String, Tuple2<InputStream, String>>> collect(File root) {
+  if(root.directory) {
+    return Files.walk(root.toPath())
+        .parallel()
+        .sorted()
+        .map({ Path path ->
+      String key = normalize(path.normalize().relativize(root.toPath().normalize()).toString())
+      boolean dir = path.toFile().directory
       Tuple2 pair = new Tuple2(
-          subfile.directory ? null : subfile.newInputStream(),
-          subfile.directory ? 'd' : collectData(subfile.newInputStream()) 
+          dir ? null : path.newInputStream(),
+          dir ? 'd' : collectData(path.newInputStream())
       )
-      data << [(key): pair]
-    }
-  }
-  else if(isArchive(root)) {
+      return [(key): pair].entrySet().first()
+    })
+  } else if(isArchive(root)) {
     // zip files
     ZipFile zip = new ZipFile(root)
-    zip.stream().each { ZipEntry entry ->
-      key = normalize(entry.directory ? entry.name[0..-2] : entry.name)
+    return zip.stream()
+        .parallel()
+        .sorted({ a, b -> a.name <=> b.name })
+        .map({ ZipEntry entry ->
+      String key = normalize(entry.directory ? entry.name[0..-2] : entry.name)
 
       Tuple2<InputStream, String> pair = new Tuple2(
           new BufferedInputStream(zip.getInputStream(entry)),
           entry.directory ? 'd' : collectData(zip.getInputStream(entry))
       )
 
-      data << [(key): pair]
-    }
-  }
-  else {
+      return [(key): pair].entrySet().first()
+    })
+  } else {
     // whatever file
-    key = normalize(root.canonicalPath)
+    String key = normalize(root.canonicalPath)
 
     Tuple2 pair = new Tuple2(
         root.newInputStream(),
         collectData(root.newInputStream()))
 
-    data << [(key): pair]
+    return [(key): pair].entrySet().stream()
   }
-
-  data
 }
 
 String collectData(InputStream stream) {
