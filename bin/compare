@@ -4,6 +4,7 @@
     @Grab(group = 'org.lz4', module = 'lz4-java', version = '1.4.1')
 ])
 
+import groovy.cli.commons.CliBuilder
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -37,12 +38,12 @@ if (!options || options?.help || options?.arguments()?.size() != 2 ) {
   cli.usage()
   return
 }
-ZIP_MAGIC = 0x504b
+ZIP_MAGIC = 0x504b //PK
 CLASS_MAGIC = 0xCAFEBABE
 TWIDTH = System.getenv("COLUMNS")?.toInteger() ?: 200
 
 factory = XXHashFactory.fastestInstance()
-MD = factory.newStreamingHash32((int) 0x9747b28c)
+MD = factory.newStreamingHash64((int) 0x9747b28c)
 
 excludes = ['pom.properties']
 normalizePatterns = options.n ? options.n.split(',') : false
@@ -167,6 +168,7 @@ void compare(Stream<Map.Entry<String, Tuple2<InputStream, String>>> left, Stream
     switch (key <=> rentry.key) {
       case -1:
         if (match) printMiss "-- $key"
+        lentry.value.first?.close()
         lentry = l.hasNext() ? l.next() : null
         break
       case 0:
@@ -191,11 +193,14 @@ void compare(Stream<Map.Entry<String, Tuple2<InputStream, String>>> left, Stream
             diff(lvalue.first, rvalue.first)
           }
         }
+        lvalue.first?.close()
+        rvalue.first?.close()
         lentry = l.hasNext() ? l.next() : null
         rentry = r.hasNext() ? r.next() : null
         break
       case 1:
         if (match) printAdd "++ $key"
+        rentry.value.first?.close()
         rentry = r.hasNext() ? r.next() : null
         break
     }
@@ -205,12 +210,14 @@ void compare(Stream<Map.Entry<String, Tuple2<InputStream, String>>> left, Stream
     lentry = l.next()
     key = lentry.key
     if (match) printMiss "-- $key"
+    lentry.value.first?.close()
   }
 
   while (r.hasNext()) {
     rentry = r.next()
     key = rentry.key
     if (match) printAdd "++ $key"
+    rentry.value.first?.close()
   }
 }
 
@@ -239,7 +246,7 @@ Stream<Map.Entry<String, Tuple2<InputStream, String>>> collect(File root) {
         .parallel()
         .sorted()
         .map({ Path path ->
-      String key = normalize(path.normalize().relativize(root.toPath().normalize()).toString())
+      String key = normalize(root.toPath().normalize().relativize(path.normalize()).toString())
       boolean dir = path.toFile().directory
       Tuple2 pair = new Tuple2(
           dir ? null : path.newInputStream(),
@@ -277,6 +284,7 @@ Stream<Map.Entry<String, Tuple2<InputStream, String>>> collect(File root) {
 
 String collectData(InputStream stream) {
   if(!options.h){
+    stream.close()
     return '0'
   }
 
@@ -312,6 +320,7 @@ boolean isClass(def file) {
 }
 
 boolean checkOnMagic(def file, int read, def magic) {
+  if (!file) return false
   if (file instanceof File) file = new BufferedInputStream(new FileInputStream(file))
   if (file.markSupported()) file.mark(read)
   long check = 0l
